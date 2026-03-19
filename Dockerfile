@@ -6,12 +6,12 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 go build -o /dating ./cmd/dating
+RUN CGO_ENABLED=0 go build -o /rag-api ./cmd/rag-api
 
 FROM alpine:3.21
 
-COPY --from=builder /dating /dating
+COPY --from=builder /rag-api /rag-api
 
 EXPOSE 8080
 
-ENTRYPOINT ["/dating", "-mode", "http", "-addr", ":8080"]
+ENTRYPOINT ["/rag-api", "-mode", "http", "-addr", ":8080"]

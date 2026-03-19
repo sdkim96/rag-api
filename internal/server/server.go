@@ -7,13 +7,15 @@ import (
 
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/sdkim96/rag-api/config"
-	"github.com/sdkim96/rag-api/internal/indexing"
+	"github.com/sdkim96/rag-api/internal/infra/blobstore"
 	"github.com/sdkim96/rag-api/internal/infra/db"
+	"github.com/sdkim96/rag-api/internal/source"
 )
 
 type Server struct {
-	mcp *server.MCPServer
-	db  *db.Engine
+	mcp  *server.MCPServer
+	db   *db.Engine
+	blob blobstore.BlobStore
 }
 
 func NewServer(cfg *config.Config) *Server {
@@ -32,11 +34,20 @@ func NewServer(cfg *config.Config) *Server {
 		panic(err)
 	}
 
+	azureblob, err := blobstore.NewAzureBlobStore(
+		cfg.AzureBlobStore.AccountName,
+		cfg.AzureBlobStore.ConnString,
+		cfg.AzureBlobStore.ContainerName,
+	)
+	if err != nil {
+		panic(err)
+	}
+
 	fmt.Println("[INIT] Initializing MCP server and registering tools...")
 	mcp := server.NewMCPServer(cfg.Project.Name, cfg.Project.Version)
 
-	s := &Server{mcp: mcp, db: dbEngine}
-	indexing.Register(s.mcp, dbEngine)
+	s := &Server{mcp: mcp, db: dbEngine, blob: azureblob}
+	source.Register(s.mcp, dbEngine, azureblob)
 
 	return s
 

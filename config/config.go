@@ -7,14 +7,21 @@ import (
 )
 
 type Config struct {
-	Project Project
-	DB      RDB
+	Project        Project
+	DB             RDB
+	AzureBlobStore AzureBlobStore
 }
 
 type Project struct {
 	Name        string
 	Description string
 	Version     string
+}
+
+type AzureBlobStore struct {
+	AccountName   string
+	ConnString    string
+	ContainerName string
 }
 
 type RDB struct {
@@ -49,6 +56,11 @@ func Load() (*Config, error) {
 			Name: getEnv("DB_NAME", ""),
 			SSL:  getEnv("DB_SSL", "disable"),
 		},
+		AzureBlobStore: AzureBlobStore{
+			AccountName:   getEnv("AZURE_BLOB_ACCOUNT_NAME", ""),
+			ConnString:    getEnv("AZURE_BLOB_CONN_STRING", ""),
+			ContainerName: getEnv("AZURE_BLOB_CONTAINER_NAME", ""),
+		},
 	}
 
 	if err := cfg.validate(); err != nil {
@@ -67,6 +79,15 @@ func (c *Config) validate() error {
 	}
 	if c.DB.Name == "" {
 		return fmt.Errorf("DB_NAME is required")
+	}
+	if c.AzureBlobStore.AccountName == "" {
+		return fmt.Errorf("AZURE_BLOB_ACCOUNT_NAME is required")
+	}
+	if c.AzureBlobStore.ConnString == "" {
+		return fmt.Errorf("AZURE_BLOB_CONN_STRING is required")
+	}
+	if c.AzureBlobStore.ContainerName == "" {
+		return fmt.Errorf("AZURE_BLOB_CONTAINER_NAME is required")
 	}
 	return nil
 }

@@ -27,6 +27,52 @@ func (n namespace) String() string {
 	return fmt.Sprintf("%s://%s", n.scheme, n.name)
 }
 
+func (e *Engine) ReadAll(ctx context.Context, namespace namespace, opts ...ReadOption) ([][]byte, error) {
+	options := &readOptions{}
+	for _, opt := range opts {
+		opt(options)
+	}
+
+	stmt := `SELECT value FROM store WHERE namespace = $1 AND deleted_at IS NULL`
+	args := []any{namespace.String(), options.offset, options.limit}
+
+	//TODO: Change to the metadata like
+	if options.keyword != "" {
+		stmt += ` AND value::text ILIKE '%' || $4 || '%'`
+		args = append(args, options.keyword)
+	}
+
+	stmt += ` OFFSET $2 LIMIT $3`
+
+	return readAll(ctx, e.Conn(), stmt, args...)
+}
+
+type ReadOption func(*readOptions)
+
+type readOptions struct {
+	offset  int
+	limit   int
+	keyword string
+}
+
+func WithOffset(offset int) ReadOption {
+	return func(opts *readOptions) {
+		opts.offset = offset
+	}
+}
+
+func WithLimit(limit int) ReadOption {
+	return func(opts *readOptions) {
+		opts.limit = limit
+	}
+}
+
+func WithKeyword(keyword string) ReadOption {
+	return func(opts *readOptions) {
+		opts.keyword = keyword
+	}
+}
+
 func (e *Engine) Read(ctx context.Context, namespace namespace, key string) ([]byte, error) {
 	return read(ctx, e.Conn(),
 		`SELECT value FROM store 
@@ -50,6 +96,24 @@ func (e *Engine) Delete(ctx context.Context, namespace namespace, key string) er
 		 WHERE namespace = $1 AND key = $2`,
 		namespace.String(), key,
 	)
+}
+
+func readAll(ctx context.Context, conn *sql.DB, query string, args ...any) ([][]byte, error) {
+	rows, err := conn.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results [][]byte
+	for rows.Next() {
+		var value []byte
+		if err := rows.Scan(&value); err != nil {
+			return nil, err
+		}
+		results = append(results, value)
+	}
+	return results, rows.Err()
 }
 
 func read(ctx context.Context, conn *sql.DB, query string, args ...any) ([]byte, error) {

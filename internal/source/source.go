@@ -4,6 +4,21 @@ import (
 	"time"
 )
 
+type IndexingStatus string
+
+const (
+	StatusNotStarted IndexingStatus = "not_started"
+	StatusInProgress IndexingStatus = "in_progress"
+	StatusCompleted  IndexingStatus = "completed"
+	StatusFailed     IndexingStatus = "failed"
+)
+
+type SourceMeta struct {
+	Description string `json:"description,omitempty"`
+	Author      string `json:"author,omitempty"`
+	Version     int    `json:"version,omitempty"`
+}
+
 type Origin struct {
 	URI      string            `json:"uri"`
 	MimeType string            `json:"mime_type"`
@@ -19,9 +34,17 @@ type Blob struct {
 }
 
 type Source struct {
-	ID        string     `json:"id"`
-	Origin    Origin     `json:"origin"`
-	Blob      Blob       `json:"blob"`
-	CreatedAt time.Time  `json:"created_at"`
-	DeletedAt *time.Time `json:"deleted_at,omitempty"`
+	ID        string    `json:"id"`
+	OwnerID   string    `json:"owner_id"`
+	URI       string    `json:"uri"`
+	MimeType  string    `json:"mime_type"`
+	Name      string    `json:"name"`
+	Origin    Origin    `json:"origin"`
+	Size      int64     `json:"size"`
+	CreatedAt time.Time `json:"created_at,omitempty"`
+}
+
+type SourceIndexing struct {
+	Source
+	Status IndexingStatus `json:"status"`
 }

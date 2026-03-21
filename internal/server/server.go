@@ -6,16 +6,21 @@ import (
 	"time"
 
 	"github.com/mark3labs/mcp-go/server"
+	"github.com/openai/openai-go"
+	"github.com/openai/openai-go/option"
 	"github.com/sdkim96/rag-api/config"
+	"github.com/sdkim96/rag-api/internal/indexing"
 	"github.com/sdkim96/rag-api/internal/infra/blobstore"
 	"github.com/sdkim96/rag-api/internal/infra/db"
+	"github.com/sdkim96/rag-api/internal/infra/indexer"
+	"github.com/sdkim96/rag-api/internal/search"
 	"github.com/sdkim96/rag-api/internal/source"
 )
 
 type Server struct {
-	mcp  *server.MCPServer
-	db   *db.Engine
-	blob blobstore.BlobStore
+	mcp *server.MCPServer
+	db  *db.Engine
+	bs  blobstore.BlobStore
 }
 
 func NewServer(cfg *config.Config) *Server {
@@ -34,7 +39,7 @@ func NewServer(cfg *config.Config) *Server {
 		panic(err)
 	}
 
-	azureblob, err := blobstore.NewAzureBlobStore(
+	bs, err := blobstore.NewAzureBlobStore(
 		cfg.AzureBlobStore.AccountName,
 		cfg.AzureBlobStore.ConnString,
 		cfg.AzureBlobStore.ContainerName,
@@ -42,12 +47,25 @@ func NewServer(cfg *config.Config) *Server {
 	if err != nil {
 		panic(err)
 	}
+	oaiClient := openai.NewClient(
+		option.WithAPIKey(cfg.OpenAI.APIKey),
+	)
+
+	index, err := indexer.New(cfg, dbEngine, bs)
+	if err != nil {
+		panic(err)
+	}
 
 	fmt.Println("[INIT] Initializing MCP server and registering tools...")
 	mcp := server.NewMCPServer(cfg.Project.Name, cfg.Project.Version)
 
-	s := &Server{mcp: mcp, db: dbEngine, blob: azureblob}
-	source.Register(s.mcp, dbEngine, azureblob)
+	s := &Server{mcp: mcp, db: dbEngine, bs: bs}
+
+	source.Register(s.mcp, dbEngine, bs)
+	indexing.Register(s.mcp, dbEngine, index)
+	search.Register(s.mcp, dbEngine, oaiClient)
+
+	fmt.Printf("[INIT] Server initialization completed. Endpoints: %v", s.mcp.ListTools())
 
 	return s
 

@@ -2,7 +2,6 @@ package source
 
 import (
 	"context"
-	"time"
 
 	"github.com/google/uuid"
 	mcpgo "github.com/mark3labs/mcp-go/mcp"
@@ -15,8 +14,11 @@ import (
 type AddSourceReq struct {
 	URI      string            `json:"uri"`
 	MimeType string            `json:"mime_type"`
+	Title    string            `json:"title"`
 	Headers  map[string]string `json:"headers,omitempty"`
+	Meta     *SourceMeta       `json:"source_meta,omitempty"`
 }
+
 type AddSourceResp struct {
 	ID      string `json:"id"`
 	Status  string `json:"status"`
@@ -24,16 +26,17 @@ type AddSourceResp struct {
 }
 
 type ReadSourcesReq struct {
-	Offset  int    `json:"offset"`
-	Limit   int    `json:"limit"`
-	Keyword string `json:"keyword,omitempty"`
+	ID      []string `json:"id,omitempty"`
+	Offset  int      `json:"offset"`
+	Limit   int      `json:"limit"`
+	Keyword string   `json:"keyword,omitempty"`
 }
 
 type ReadSourcesResp struct {
-	Sources []Source `json:"sources"`
-	Offset  int      `json:"offset"`
-	Limit   int      `json:"limit"`
-	Total   int      `json:"total"`
+	Sources []SourceIndexing `json:"sources"`
+	Offset  int              `json:"offset"`
+	Limit   int              `json:"limit"`
+	Total   int              `json:"total"`
 }
 
 type DeleteSourceReq struct {
@@ -44,10 +47,11 @@ type DeleteSourceResp struct {
 	Status string `json:"status"`
 }
 
-func Register(s *server.MCPServer, db *db.Engine, bs blobstore.BlobStore) {
-	mcputil.Register(s, mcputil.HandlerSpec[AddSourceReq, AddSourceResp]{
+func Register(s *server.MCPServer, e *db.Engine, bs blobstore.BlobStore) {
+	mcputil.RegisterWithSchema(s, mcputil.HandlerSpecWithSchema[AddSourceReq, AddSourceResp]{
 		Name: "add_source",
 		Description: `Register a source URI to be indexed.
+Note that this endpoint does not index the content immediately. It only registers the source being ready for indexing. 
 
 A source is an accessible endpoint that this system will fetch, analyze, and index.
 You do not need to upload the file — just provide a URI and MimeType that this system can access.
@@ -61,9 +65,9 @@ Supported URI schemes:
 - http://   HTTP endpoint          (e.g. http://internal.server/doc.pdf)
 - https://  HTTPS endpoint         (e.g. https://storage.example.com/report.pdf)
 `,
-		Handler: addHandler(db, bs),
+		Handler: addHandler(e, bs),
 	})
-	mcputil.Register(s, mcputil.HandlerSpec[ReadSourcesReq, ReadSourcesResp]{
+	mcputil.RegisterWithSchema(s, mcputil.HandlerSpecWithSchema[ReadSourcesReq, ReadSourcesResp]{
 		Name: "read_sources",
 		Description: `List all registered sources and their indexing status.
 
@@ -74,15 +78,15 @@ Supported URI schemes:
 	- indexing    Currently being processed by the pipeline
 	- indexed     Successfully indexed and searchable
 	- error       Processing failed`,
-		Handler: readHandler(db),
+		Handler: readHandler(e),
 	})
-	mcputil.Register(s, mcputil.HandlerSpec[DeleteSourceReq, DeleteSourceResp]{
+	mcputil.RegisterWithSchema(s, mcputil.HandlerSpecWithSchema[DeleteSourceReq, DeleteSourceResp]{
 		Name:        "delete_source",
 		Description: "Delete a registered source and its indexed data",
-		Handler:     deleteHandler(db),
+		Handler:     deleteHandler(e),
 	})
 }
-func addHandler(db *db.Engine, bs blobstore.BlobStore) func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+func addHandler(e *db.Engine, bs blobstore.BlobStore) func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	return func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 		r, err := mcputil.Convert[AddSourceReq](req)
 		if err != nil {
@@ -107,12 +111,16 @@ func addHandler(db *db.Engine, bs blobstore.BlobStore) func(ctx context.Context,
 
 		source := Source{
 			ID:        sid.String(),
+			OwnerID:   db.System,
+			URI:       blob.URI,
+			MimeType:  blob.MimeType,
+			Name:      r.Title,
 			Origin:    org,
-			Blob:      blob,
-			CreatedAt: time.Now(),
+			Size:      blob.Size,
+			CreatedAt: blob.CreatedAt,
 		}
 
-		err = InsertDB(ctx, db, sid.String(), source)
+		err = InsertSource(ctx, e, source)
 		if err != nil {
 			return mcputil.Error(err), nil
 		}
@@ -132,7 +140,7 @@ func readHandler(db *db.Engine) func(ctx context.Context, req mcpgo.CallToolRequ
 			return mcputil.Error(err), nil
 		}
 
-		srcs, err := ReadDB(ctx, db, r.Offset, r.Limit, r.Keyword)
+		srcs, err := SelectSources(ctx, db, r)
 		if err != nil {
 			return mcputil.Error(err), nil
 		}
@@ -153,8 +161,10 @@ func deleteHandler(db *db.Engine) func(ctx context.Context, req mcpgo.CallToolRe
 		if err != nil {
 			return mcputil.Error(err), nil
 		}
-		// Business logic
-		_ = r
+		err = DeleteSource(ctx, db, r.ID)
+		if err != nil {
+			return mcputil.Error(err), nil
+		}
 		resp := DeleteSourceResp{
 			ID:     r.ID,
 			Status: "ok",

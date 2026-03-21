@@ -7,14 +7,15 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"time"
 
-	"github.com/sdkim96/indexing/uri"
+	"github.com/sdkim96/indexing/urio"
 	"github.com/sdkim96/rag-api/internal/infra/blobstore"
 	"github.com/sdkim96/rag-api/internal/infra/db"
 )
 
 func FetchSource(ctx context.Context, origin Origin) (io.Reader, error) {
-	u := uri.URI(origin.URI)
+	u := urio.URI(origin.URI)
 	err := u.Validate()
 	if err != nil {
 		return nil, err
@@ -56,39 +57,53 @@ func UploadBlob(ctx context.Context, s blobstore.BlobStore, key, mimeType string
 		return Blob{}, err
 	}
 	return Blob{
-		URI:      blob.URI(),
-		Key:      key,
-		MimeType: blob.MimeType(),
-		Size:     blob.Size(),
+		URI:       blob.URI(),
+		Key:       key,
+		MimeType:  blob.MimeType(),
+		Size:      blob.Size(),
+		CreatedAt: time.Now(),
 	}, nil
 }
 
-func InsertDB(ctx context.Context, e *db.Engine, sid string, source Source) error {
-	s, err := json.Marshal(source)
+func InsertSource(ctx context.Context, e *db.Engine, s Source) error {
+
+	origin, err := json.Marshal(s.Origin)
 	if err != nil {
 		return err
 	}
-	e.Write(ctx, db.NewSourceNS("rag-api"), sid, s)
-	return nil
+
+	return e.InsertSource(
+		ctx,
+		s.ID,
+		db.System,
+		s.URI,
+		s.MimeType,
+		s.Name,
+		s.Size,
+		origin,
+	)
 }
 
-func ReadDB(ctx context.Context, e *db.Engine, offset, limit int, keyword string) ([]Source, error) {
-	v, err := e.ReadAll(ctx, db.NewSourceNS("rag-api"),
-		db.WithOffset(offset),
-		db.WithLimit(limit),
-		db.WithKeyword(keyword),
-	)
+func SelectSources(ctx context.Context, e *db.Engine, r ReadSourcesReq) ([]SourceIndexing, error) {
+	srcBytes, err := e.SelectSources(ctx, r.ID, r.Offset, r.Limit, r.Keyword)
 	if err != nil {
 		return nil, err
 	}
-	var srcs []Source
-	for _, vv := range v {
-		var s Source
-		err = json.Unmarshal(vv, &s)
+	var srcs []SourceIndexing
+	for _, b := range srcBytes {
+		var srcI SourceIndexing
+		err := json.Unmarshal(b, &srcI)
 		if err != nil {
 			return nil, err
 		}
-		srcs = append(srcs, s)
+		if srcI.Status == "" {
+			srcI.Status = StatusNotStarted
+		}
+		srcs = append(srcs, srcI)
 	}
 	return srcs, nil
+}
+
+func DeleteSource(ctx context.Context, e *db.Engine, sid string) error {
+	return e.DeleteSource(ctx, sid)
 }

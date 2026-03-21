@@ -8,20 +8,35 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 )
 
-type HandlerSpec[In, Out any] struct {
+type HandlerSpecWithSchema[In, Out any] struct {
+	Name        string
+	Description string
+	Handler     func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error)
+}
+type HandlerSpecWithInSchema[In any] struct {
 	Name        string
 	Description string
 	Handler     func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error)
 }
 
 // Register registers a tool with the MCP server.
-func Register[In, Out any](s *server.MCPServer, spec HandlerSpec[In, Out]) {
+func RegisterWithSchema[In, Out any](s *server.MCPServer, spec HandlerSpecWithSchema[In, Out]) {
 	s.AddTool(
 		mcp.NewTool(
 			spec.Name,
 			mcp.WithDescription(spec.Description),
 			mcp.WithInputSchema[In](),
 			mcp.WithOutputSchema[Out](),
+		),
+		spec.Handler,
+	)
+}
+func RegisterWithInSchema[In any](s *server.MCPServer, spec HandlerSpecWithInSchema[In]) {
+	s.AddTool(
+		mcp.NewTool(
+			spec.Name,
+			mcp.WithDescription(spec.Description),
+			mcp.WithInputSchema[In](),
 		),
 		spec.Handler,
 	)
